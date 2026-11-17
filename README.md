@@ -41,6 +41,41 @@ value priced at each project's rate.
 Menus everywhere: Settings also holds the studio name, currency, default rate,
 tags, JSON import/export, cloud sync, install prompt and shortcuts.
 
+## Voice control
+
+The mic button (bottom right, or **Ctrl/⌘ + Shift + V**, or ⌘K → "Voice
+command") takes a spoken command and runs it against the live workspace, so the
+whole CRM can be driven by voice alone: navigation, tasks, clients, projects,
+team and time entries.
+
+```text
+open timesheet                     show client Meridian
+add task Review Q4 invoices         complete QA smoke test
+move Accessibility pass to in review     assign … to Dev
+new client Northwind               new project Brand refresh for Halcyon
+set budget for Patient portal to 64000   set retainer for Halcyon to 4500
+delete project Kestrel onboarding    log 2 hours to Patient portal by Sam
+```
+
+Speech recognition uses the browser's Web Speech API (Chrome, Edge, Safari);
+where it is missing the app still accepts commands from an agent. Any agent —
+an in-page script, an iframe, or a desktop voice assistant driving the page —
+can call the same dispatcher:
+
+```js
+window.studioVoice.runCommand('log 45 minutes to Design system audit by Ana')
+window.studioVoice.start()   // begin listening
+window.studioVoice.stop()
+
+// or from an embedding shell
+iframe.contentWindow.postMessage({ type: 'studio:command', text: 'open projects' }, '*')
+```
+
+`runCommand` is the single entry point for every action, so an external agent
+that transcribes audio itself (Whisper, Deepgram, a native assistant) only has
+to pass the final sentence here. Commands that remove or finish something offer
+Undo; say or send `undo` to reverse the last one.
+
 ## Run it
 
 ```sh

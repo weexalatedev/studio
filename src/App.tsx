@@ -10,6 +10,7 @@ import {
   LayoutDashboard,
   ListPlus,
   ListTodo,
+  Mic,
   Palette,
   PanelLeft,
   PanelLeftOpen,
@@ -45,13 +46,26 @@ import {
   type Task,
   type View,
 } from './app/store'
+import { useVoice } from './app/useVoice'
+import { VoiceButton } from './app/VoiceButton'
 import { IconButton } from './components/IconButton'
 import { IconChip } from './components/IconChip'
 import { Scenery } from './components/Scenery'
 import { SegmentedControl } from './components/SegmentedControl'
 import { Toast, type ToastData } from './components/Toast'
 import { isOverlayOpen } from './components/useOverlay'
-import { BACKGROUND_PHOTO, COPY, DATE_FILTERS, LIST_EMPTY, SCENES, SMART_LISTS, type SceneId, type Tone } from './data'
+import {
+  BACKGROUND_PHOTO,
+  COPY,
+  DATE_FILTERS,
+  LIST_EMPTY,
+  SCENES,
+  SMART_LISTS,
+  type ClientStatus,
+  type ProjectStatus,
+  type SceneId,
+  type Tone,
+} from './data'
 import { shortLabel, type DateBucket } from './lib/dates'
 import { downloadExport } from './lib/io'
 import { EASE_OUT } from './lib/motion'
@@ -99,6 +113,7 @@ export function App() {
   const searchRef = useRef<HTMLInputElement>(null)
   const addRef = useRef<HTMLInputElement>(null)
   const timers = useRef(new Map<string, number>())
+  const voiceRef = useRef<{ listening: boolean; start: () => void; stop: () => void } | null>(null)
 
   const sidebarOpen = narrow ? mobileOpen : !collapsed
   const searching = query.trim().length > 0
@@ -341,6 +356,7 @@ export function App() {
         },
       },
       { id: 'search', group: 'Actions', label: 'Search tasks', icon: Search, hint: '/', run: focusSearch },
+      { id: 'voice', group: 'Actions', label: 'Voice command', keywords: 'microphone speech dictate', icon: Mic, hint: 'Ctrl+Shift+V', run: () => voiceRef.current?.start() },
       { id: 'sidebar', group: 'Actions', label: sidebarOpen ? 'Hide sidebar' : 'Show sidebar', icon: PanelLeft, hint: '[', run: () => showSidebar(!sidebarOpen) },
       { id: 'settings', group: 'Actions', label: 'Open settings', icon: Settings, run: () => setSettingsOpen(true) },
       { id: 'clear-done', group: 'Actions', label: 'Clear completed tasks', keywords: 'delete done', icon: Trash2, run: clearCompleted },
@@ -472,9 +488,16 @@ export function App() {
   // ---- Keyboard ----------------------------------------------------------------------
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k' && !e.shiftKey) {
         e.preventDefault()
         setPaletteOpen((o) => !o)
+        return
+      }
+      // Ctrl/Cmd + Shift + V toggles the voice command bar.
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 'v') {
+        e.preventDefault()
+        if (voiceRef.current?.listening) voiceRef.current.stop()
+        else voiceRef.current?.start()
         return
       }
       const el = e.target as HTMLElement
@@ -495,6 +518,365 @@ export function App() {
 
   const defaults = defaultsFor(view)
   const openTask = state.tasks.find((t) => t.id === openId) ?? null
+
+  // ---- Voice command dispatcher (full CRM control) -------------------------------
+  // Spoken titles arrive lowercase; capitalise the first letter for readability.
+  const tidy = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
+  const findTask = (name: string) => {
+    const q = name.trim().toLowerCase()
+    return state.tasks.find((t) => t.title.toLowerCase().includes(q)) ?? null
+  }
+  const findClient = (name: string) => {
+    const q = name.trim().toLowerCase()
+    return state.clients.find((c) => c.name.toLowerCase().includes(q)) ?? null
+  }
+  const findProject = (name: string) => {
+    const q = name.trim().toLowerCase()
+    return state.projects.find((p) => p.name.toLowerCase().includes(q)) ?? null
+  }
+  const findMember = (name: string) => {
+    const q = name.trim().toLowerCase()
+    return state.members.find((m) => m.name.toLowerCase().includes(q)) ?? null
+  }
+
+  const runVoiceCommand = useCallback(
+    (raw: string) => {
+      const text = raw.trim()
+      if (!text) return
+      const t = text
+        .toLowerCase()
+        .replace(/^(?:hey\s+)?(?:studio|assistant)[\s,]+/, '')
+        .replace(/^(?:please|ok|okay|now)[\s,]+/, '')
+        .replace(/[.!?]+$/, '')
+        .trim()
+      const say = (msg: string) => notify(msg)
+
+      // --- undo the last action that offered it ---
+      if (/^(undo|undo that|cancel that|revert)$/.test(t)) {
+        if (toast?.action) { toast.action.run(); setToast(null); say('Undone') }
+        else say('Nothing to undo')
+        return
+      }
+
+      // --- navigation (only bare destinations, so "delete client X" isn't read as "open clients") ---
+      const nav = t.replace(/^(?:please\s+)?(?:open|show|go\s+to|goto|view|switch\s+to|take\s+me\s+to)\s+/, '').replace(/^(?:the|my)\s+/, '').trim()
+      const simpleNav: Record<string, () => void> = {
+        overview: () => selectView({ kind: 'overview' }),
+        dashboard: () => selectView({ kind: 'overview' }),
+        home: () => selectView({ kind: 'overview' }),
+        clients: () => selectView({ kind: 'clients' }),
+        client: () => selectView({ kind: 'clients' }),
+        projects: () => selectView({ kind: 'projects' }),
+        project: () => selectView({ kind: 'projects' }),
+        team: () => selectView({ kind: 'team' }),
+        people: () => selectView({ kind: 'team' }),
+        members: () => selectView({ kind: 'team' }),
+        timesheet: () => selectView({ kind: 'time' }),
+        time: () => selectView({ kind: 'time' }),
+        hours: () => selectView({ kind: 'time' }),
+        inbox: () => selectView({ kind: 'smart', id: 'inbox' }),
+        today: () => selectView({ kind: 'smart', id: 'today' }),
+        upcoming: () => selectView({ kind: 'smart', id: 'upcoming' }),
+        starred: () => selectView({ kind: 'smart', id: 'starred' }),
+        completed: () => selectView({ kind: 'smart', id: 'completed' }),
+      }
+      const navTo = simpleNav[nav]
+      if (navTo) { navTo(); say(`Opening ${nav}`); return }
+
+      // --- search ---
+      let m = t.match(/^search\s+(.+)/)
+      if (m) { setQuery(m[1].trim()); say(`Searching for ${m[1].trim()}`); return }
+
+      // --- show/open client ---
+      m = t.match(/^(?:show|open|view)\s+client\s+(.+)/)
+      if (m) {
+        const c = findClient(m[1])
+        if (c) { selectView({ kind: 'client', id: c.id }); say(`Opening ${c.name}`); return }
+        say(`No client matching ${m[1]}`); return
+      }
+      // --- show/open project ---
+      m = t.match(/^(?:show|open|view)\s+project\s+(.+)/)
+      if (m) {
+        const p = findProject(m[1])
+        if (p) { selectView({ kind: 'project', id: p.id }); say(`Opening ${p.name}`); return }
+        say(`No project matching ${m[1]}`); return
+      }
+      // --- open task ---
+      m = t.match(/^(?:open|show|view)\s+task\s+(.+)/)
+      if (m) {
+        const tk = findTask(m[1])
+        if (tk) { setOpenId(tk.id); say(`Opening ${tk.title}`); return }
+        say(`No task matching ${m[1]}`); return
+      }
+
+      // --- add task ---
+      m = t.match(/^(?:add|new|create)\s+(?:a\s+)?task\s+(.+)/)
+      if (m) {
+        const title = tidy(m[1].trim())
+        const listId = view.kind === 'list' && !query.trim() ? view.id : null
+        const task = actions.addTask(title, { listId })
+        say(`Added task: ${task.title}`)
+        return
+      }
+
+      // --- complete task ---
+      m = t.match(/^(?:complete|finish|mark\s+done|done)\s+(?:task\s+)?(.+)/)
+      if (m) {
+        const tk = findTask(m[1])
+        if (tk && !tk.done) { toggle(tk); say(`Completing ${tk.title}`); return }
+        if (tk && tk.done) { say(`${tk.title} is already done`); return }
+        say(`No task matching ${m[1]}`); return
+      }
+      // --- uncomplete ---
+      m = t.match(/^(?:uncomplete|reopen|restore)\s+(?:task\s+)?(.+)/)
+      if (m) {
+        const tk = findTask(m[1])
+        if (tk && tk.done) { actions.toggleTask(tk.id); say(`Restored ${tk.title}`); return }
+        say(tk ? `${tk.title} is not done` : `No task matching ${m[1]}`); return
+      }
+      // --- delete task ---
+      m = t.match(/^(?:delete|remove)\s+(?!client\b|project\b|member\b)(?:task\s+)?(.+)/)
+      if (m) {
+        const tk = findTask(m[1])
+        if (tk) {
+          setOpenId(null)
+          actions.removeTask(tk.id)
+          say(`Deleted ${tk.title}`)
+          return
+        }
+        say(`No task matching ${m[1]}`); return
+      }
+      // --- star task ---
+      m = t.match(/^(?:star|favourite|favorite)\s+(?:task\s+)?(.+)/)
+      if (m) {
+        const tk = findTask(m[1])
+        if (tk) { actions.updateTask(tk.id, { starred: true }); say(`Starred ${tk.title}`); return }
+        say(`No task matching ${m[1]}`); return
+      }
+      m = t.match(/^(?:unstar)\s+(?:task\s+)?(.+)/)
+      if (m) {
+        const tk = findTask(m[1])
+        if (tk) { actions.updateTask(tk.id, { starred: false }); say(`Unstarred ${tk.title}`); return }
+        say(`No task matching ${m[1]}`); return
+      }
+      // --- priority ---
+      m = t.match(/^(?:set\s+)?priority\s+(high|medium|med|low|none)\s+(?:on|for|to)?\s*(?:task\s+)?(.+)/)
+      if (m) {
+        const map = { high: 3, medium: 2, med: 2, low: 1, none: 0 } as const
+        const tk = findTask(m[2])
+        if (tk) { actions.updateTask(tk.id, { priority: map[m[1] as keyof typeof map] }); say(`Set priority ${m[1]} on ${tk.title}`); return }
+        say(`No task matching ${m[2]}`); return
+      }
+      // --- assign ---
+      m = t.match(/^assign\s+(.+?)\s+to\s+(.+)/)
+      if (m) {
+        const tk = findTask(m[1])
+        const member = findMember(m[2])
+        if (tk && member) { actions.updateTask(tk.id, { assigneeId: member.id }); say(`Assigned ${tk.title} to ${member.name}`); return }
+        if (!tk) { say(`No task matching ${m[1]}`); return }
+        if (!member) { say(`No team member matching ${m[2]}`); return }
+      }
+      // --- board status move ---
+      m = t.match(/^move\s+(.+?)\s+to\s+(todo|to do|in progress|doing|review|in review|done)\b/)
+      if (m) {
+        const tk = findTask(m[1])
+        const status = m[2].replace(/\s+/g, ' ')
+        if (tk) {
+          if (status === 'done') actions.updateTask(tk.id, { done: true, completedAt: Date.now() })
+          else {
+            const map: Record<string, 'todo' | 'doing' | 'review'> = { 'todo': 'todo', 'to do': 'todo', 'in progress': 'doing', 'doing': 'doing', 'review': 'review', 'in review': 'review' }
+            actions.updateTask(tk.id, { done: false, completedAt: null, status: map[status] })
+          }
+          say(`Moved ${tk.title} to ${status}`)
+          return
+        }
+        say(`No task matching ${m[1]}`); return
+      }
+
+      // --- new client ---
+      m = t.match(/^(?:new|add|create)\s+client\s+(.+)/)
+      if (m) {
+        const name = tidy(m[1].trim())
+        const c = actions.addClient(name)
+        say(`Added client ${c.name}`)
+        return
+      }
+      // --- new project ---
+      m = t.match(/^(?:new|add|create)\s+project\s+(.+?)\s+(?:for|under)\s+(.+)$/) ?? t.match(/^(?:new|add|create)\s+project\s+(.+)$/)
+      if (m) {
+        const name = tidy(m[1].trim())
+        let clientId = state.clients[0]?.id
+        if (m[2]) { const c = findClient(m[2]); if (c) clientId = c.id }
+        if (!clientId) { say('Add a client first, then create a project.'); return }
+        const p = actions.addProject(clientId, name)
+        say(`Added project ${p.name}`)
+        return
+      }
+      // --- new member ---
+      m = t.match(/^(?:new|add|create)\s+(?:team\s+)?(?:member|person|teammate)\s+(.+)/)
+      if (m) {
+        const name = tidy(m[1].trim())
+        const member = actions.addMember(name)
+        say(`Added team member ${member.name}`)
+        return
+      }
+
+      // --- update client/project status ---
+      m = t.match(/^(?:set|move)\s+client\s+(.+?)\s+(?:to|status)\s+(active|lead|paused|archived)/)
+      if (m) {
+        const c = findClient(m[1])
+        if (c) { actions.updateClient(c.id, { status: m[2] as ClientStatus }); say(`Set ${c.name} to ${m[2]}`); return }
+        say(`No client matching ${m[1]}`); return
+      }
+      m = t.match(/^(?:set|move)\s+project\s+(.+?)\s+(?:to|status)\s+(lead|discovery|design|build|review|launched|archived)/)
+      if (m) {
+        const p = findProject(m[1])
+        if (p) { actions.updateProject(p.id, { status: m[2] as ProjectStatus }); say(`Set ${p.name} to ${m[2]}`); return }
+        say(`No project matching ${m[1]}`); return
+      }
+
+      // --- log time ---
+      m = t.match(/^log\s+(\d+(?:\.\d+)?)\s*(hours?|hrs?|h|minutes?|mins?|m)\s*(?:to|on|for|against)?\s*(.+)/)
+      if (m) {
+        const amount = parseFloat(m[1])
+        const unit = m[2]
+        const minutes = /min|m/.test(unit) && !/month/.test(unit) ? Math.round(amount) : Math.round(amount * 60)
+        const rest = m[3].trim()
+        // split off optional member: "... by ana" / "ana ..."
+        let memberName = ''
+        let projectName = rest
+        const byMatch = rest.match(/(.+?)\s+by\s+(.+)/)
+        if (byMatch) { projectName = byMatch[1].trim(); memberName = byMatch[2].trim() }
+        const project = findProject(projectName)
+        const member = memberName ? findMember(memberName) : null
+        const memberResolved = member ?? state.members[0] ?? null
+        actions.logTime({
+          taskId: '',
+          projectId: project?.id ?? null,
+          memberId: memberResolved?.id ?? null,
+          date: new Date().toISOString().slice(0, 10),
+          minutes,
+          note: text,
+          billable: true,
+        })
+        const who = memberResolved ? memberResolved.name : 'unassigned'
+        const where = project ? project.name : 'studio time'
+        say(`Logged ${minutes >= 60 ? (minutes / 60).toFixed(1) + 'h' : minutes + 'm'} to ${where} (${who})`)
+        return
+      }
+
+      // --- filter by date ---
+      m = t.match(/^filter\s+(today|tomorrow|next\s*7|later|no\s*date)/)
+      if (m) {
+        const map: Record<string, DateFilter> = { today: 'today', tomorrow: 'tomorrow', 'next 7': 'week', 'next7': 'week', later: 'later', 'no date': 'none' }
+        const key = m[1].replace(/\s+/g, ' ')
+        setDateFilter(map[key] ?? null)
+        say(`Filtering by ${m[1]}`)
+        return
+      }
+
+      // --- delete client/project ---
+      m = t.match(/^(?:delete|remove)\s+client\s+(.+)/)
+      if (m) {
+        const c = findClient(m[1])
+        if (c) { actions.removeClient(c.id); selectView({ kind: 'clients' }); say(`Deleted client ${c.name}`); return }
+        say(`No client matching ${m[1]}`); return
+      }
+      m = t.match(/^(?:delete|remove)\s+project\s+(.+)/)
+      if (m) {
+        const p = findProject(m[1])
+        if (p) { actions.removeProject(p.id); selectView({ kind: 'projects' }); say(`Deleted project ${p.name}`); return }
+        say(`No project matching ${m[1]}`); return
+      }
+
+      m = t.match(/^(?:delete|remove)\s+(?:team\s+)?(?:member|person|teammate)\s+(.+)/)
+      if (m) {
+        const person = findMember(m[1])
+        if (person) { actions.removeMember(person.id); selectView({ kind: 'team' }); say(`Removed ${person.name}`); return }
+        say(`No team member matching ${m[1]}`); return
+      }
+
+      // --- rename ---
+      m = t.match(/^rename\s+(task|client|project)\s+(.+?)\s+to\s+(.+)/)
+      if (m) {
+        const next = tidy(m[3].trim())
+        if (m[1] === 'task') {
+          const tk = findTask(m[2])
+          if (tk) { actions.updateTask(tk.id, { title: next }); say(`Renamed to ${next}`); return }
+        } else if (m[1] === 'client') {
+          const c = findClient(m[2])
+          if (c) { actions.updateClient(c.id, { name: next }); say(`Renamed to ${next}`); return }
+        } else {
+          const p = findProject(m[2])
+          if (p) { actions.updateProject(p.id, { name: next }); say(`Renamed to ${next}`); return }
+        }
+        say(`No ${m[1]} matching ${m[2]}`); return
+      }
+
+      // --- money fields ---
+      m = t.match(/^(?:set\s+)?retainer\s+(?:for|on)\s+(.+?)\s+(?:to|at)\s+\$?(\d[\d,]*)/)
+      if (m) {
+        const c = findClient(m[1])
+        const amount = Number(m[2].replace(/,/g, ''))
+        if (c) { actions.updateClient(c.id, { retainer: amount }); say(`${c.name} retainer set to ${amount}`); return }
+        say(`No client matching ${m[1]}`); return
+      }
+      m = t.match(/^(?:set\s+)?budget\s+(?:for|on)\s+(.+?)\s+(?:to|at)\s+\$?(\d[\d,]*)/)
+      if (m) {
+        const p = findProject(m[1])
+        const amount = Number(m[2].replace(/,/g, ''))
+        if (p) { actions.updateProject(p.id, { budget: amount }); say(`${p.name} budget set to ${amount}`); return }
+        say(`No project matching ${m[1]}`); return
+      }
+
+      // --- deadlines ---
+      m = t.match(/^(?:set\s+)?deadline\s+(?:for|on)\s+(.+?)\s+(?:to|for)\s+(\d{4}-\d{2}-\d{2})/)
+      if (m) {
+        const p = findProject(m[1])
+        if (p) { actions.updateProject(p.id, { due: m[2] }); say(`${p.name} deadline set to ${m[2]}`); return }
+        say(`No project matching ${m[1]}`); return
+      }
+
+      // --- clear completed ---
+      if (/^clear\s+(?:completed|done)/.test(t)) {
+        const done = state.tasks.filter((x) => x.done)
+        if (done.length) { actions.removeTasks(done.map((x) => x.id)); say(`Cleared ${done.length} completed tasks`) }
+        else say('No completed tasks to clear')
+        return
+      }
+
+      // --- fallback: try command palette style ---
+      say(`I didn't catch that. Try: "add task …", "complete task …", "show client …", "log 2 hours to …".`)
+    },
+    [state, actions, view, query, selectView, setQuery, setOpenId, toggle, notify, setDateFilter, toast],
+  )
+
+  const voice = useVoice({ onResult: runVoiceCommand })
+  voiceRef.current = { listening: voice.listening, start: voice.start, stop: voice.stop }
+
+  // Expose to external voice agents: call directly, or postMessage in from an
+  // embedding shell. Payloads are untrusted text, executed through the same parser.
+  useEffect(() => {
+    ;(window as any).studioVoice = {
+      runCommand: runVoiceCommand,
+      start: voice.start,
+      stop: voice.stop,
+      listening: voice.listening,
+      supported: voice.supported,
+    }
+    const onMessage = (e: MessageEvent) => {
+      const data = e.data
+      if (!data || typeof data !== 'object') return
+      if (data.type === 'studio:command' && typeof data.text === 'string') runVoiceCommand(data.text)
+      else if (data.type === 'studio:listen') voice.start()
+      else if (data.type === 'studio:stop') voice.stop()
+    }
+    window.addEventListener('message', onMessage)
+    return () => {
+      delete (window as any).studioVoice
+      window.removeEventListener('message', onMessage)
+    }
+  }, [runVoiceCommand, voice.start, voice.stop, voice.listening, voice.supported])
 
   const sidebar = (
     <Sidebar
@@ -760,6 +1142,16 @@ export function App() {
           />
 
           <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} commands={commands} />
+
+          <VoiceButton
+            listening={voice.listening}
+            transcript={voice.transcript}
+            error={voice.error}
+            supported={voice.supported}
+            onStart={voice.start}
+            onStop={voice.stop}
+            onDismissError={voice.clearError}
+          />
 
           <Toast toast={toast} onDismiss={() => setToast(null)} />
         </div>
