@@ -13,7 +13,11 @@ import { toneSolid, toneTint } from '../components/tones'
 import { COPY, CURRENCIES, type Currency, type SceneId } from '../data'
 import { Field } from './agencyUi'
 import { downloadExport, MAX_IMPORT_BYTES, parseImport } from '../lib/io'
-import { getSyncToken, pullWorkspace, pushWorkspace, setSyncToken, syncAvailable } from '../lib/sync'
+import { lazy, Suspense } from 'react'
+
+import { getSyncToken, isClerkConfigured, pullWorkspace, pushWorkspace, setSyncToken, syncAvailable } from '../lib/sync'
+
+const ClerkCloudSync = lazy(() => import('./ClerkCloudSync').then((m) => ({ default: m.ClerkCloudSync })))
 import { Link } from '../router'
 import { ScenePicker } from './ScenePicker'
 import type { Actions, State, Tag } from './store'
@@ -322,7 +326,18 @@ function StudioSettings({ state, actions }: { state: State; actions: Actions }) 
   )
 }
 
-function CloudSync({ state, actions, onNotice }: { state: State; actions: Actions; onNotice: Props['onNotice'] }) {
+function CloudSync(props: { state: State; actions: Actions; onNotice: Props['onNotice'] }) {
+  if (isClerkConfigured()) {
+    return (
+      <Suspense fallback={<p className="text-[13.5px] text-muted">Loading…</p>}>
+        <ClerkCloudSync {...props} />
+      </Suspense>
+    )
+  }
+  return <TokenCloudSync {...props} />
+}
+
+function TokenCloudSync({ state, actions, onNotice }: { state: State; actions: Actions; onNotice: Props['onNotice'] }) {
   const [available, setAvailable] = useState<boolean | null>(null)
   const [token, setToken] = useState(getSyncToken())
   const [busy, setBusy] = useState<'push' | 'pull' | null>(null)

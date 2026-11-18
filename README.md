@@ -123,6 +123,22 @@ stored, so a database leak does not expose it. Sync is last-write-wins: pull
 before editing on a second device, push when you finish. There is no auth
 service — the token *is* the credential, so keep it long and private.
 
+### Optional: real accounts with Clerk (free)
+
+For per-user workspaces instead of a shared token, add Clerk (free up to 10k
+monthly active users):
+
+1. Create a free app at <https://clerk.com> and copy the publishable key.
+2. In Vercel → Settings → Environment Variables add
+   `VITE_CLERK_PUBLISHABLE_KEY` (frontend) and `CLERK_SECRET_KEY` (backend).
+3. Redeploy. Studio now shows a sign-in screen; each signed-in user gets their
+   own workspace in the same Neon database, keyed by their Clerk user id.
+4. Without those variables Studio behaves exactly as before (local-first,
+   token sync).
+
+`api/sync.ts` verifies the Clerk session JWT with `@clerk/backend` when
+`CLERK_SECRET_KEY` is set, and falls back to the `x-sync-token` flow otherwise.
+
 ## How it fits together
 
 - `src/data.ts` — app name, every string, smart lists, statuses, currencies and
