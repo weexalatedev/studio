@@ -10,6 +10,7 @@
 import { createHash } from 'node:crypto'
 
 import { neon } from '@neondatabase/serverless'
+import { verifyToken } from '@clerk/backend'
 
 type ApiRequest = {
   method?: string
@@ -46,7 +47,32 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
   }
 
   const method = (req.method ?? 'GET').toUpperCase()
-  const token = tokenOf(req)
+
+  // Resolve the caller's identity. When Clerk is configured we trust a verified
+  // session JWT (sent as `Authorization: Bearer <token>`) and key the workspace
+  // by the Clerk user id. Otherwise we fall back to the legacy sync token.
+  const clerkSecret = process.env.CLERK_SECRET_KEY
+  let clerkUserId: string | null = null
+  if (clerkSecret) {
+    const rawHeader = req.headers['authorization'] ?? req.headers['Authorization']
+    const headerValue = Array.isArray(rawHeader) ? rawHeader[0] : rawHeader
+    const bearer = (headerValue ?? '').trim().replace(/^Bearer\s+/i, '')
+    if (bearer) {
+      try {
+        const payload = await verifyToken(bearer, { secretKey: clerkSecret })
+        clerkUserId = (payload.sub as string) ?? null
+      } catch {
+        res.status(401).json({ configured: true, error: 'Invalid or expired session.' })
+        return
+      }
+    }
+    if (!clerkUserId) {
+      res.status(401).json({ configured: true, error: 'Sign in required.' })
+      return
+    }
+  }
+
+  const token = clerkUserId ? `clerk:${clerkUserId}` : tokenOf(req)
 
   // A bare GET is the capability probe the settings sheet uses.
   if (!token) {

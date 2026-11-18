@@ -5,6 +5,12 @@ import { normalizeState, type State } from '../app/store'
 
 const TOKEN_KEY = 'studio:sync-token'
 
+let clerkTokenGetter: (() => Promise<string | null>) | null = null
+export const setClerkTokenGetter = (g: (() => Promise<string | null>) | null) => {
+  clerkTokenGetter = g
+}
+export const isClerkConfigured = () => Boolean(import.meta.env.VITE_CLERK_PUBLISHABLE_KEY)
+
 export const getSyncToken = (): string => {
   try {
     return localStorage.getItem(TOKEN_KEY) ?? ''
@@ -31,13 +37,18 @@ type ApiBody = {
 }
 
 async function call(method: 'GET' | 'PUT', token: string, data?: State): Promise<{ status: number; body: ApiBody }> {
+  const headers: Record<string, string> = {}
+  if (data) headers['Content-Type'] = 'application/json'
+  if (clerkTokenGetter) {
+    const ct = await clerkTokenGetter()
+    if (ct) headers['Authorization'] = `Bearer ${ct}`
+  } else if (token) {
+    headers['x-sync-token'] = token
+  }
   const res = await fetch('/api/sync', {
     method,
     cache: 'no-store',
-    headers: {
-      ...(token ? { 'x-sync-token': token } : {}),
-      ...(data ? { 'Content-Type': 'application/json' } : {}),
-    },
+    headers,
     ...(data ? { body: JSON.stringify({ data }) } : {}),
   })
   let body: ApiBody = {}
