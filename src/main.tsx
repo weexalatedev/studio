@@ -19,7 +19,6 @@ function Root() {
       </Suspense>
     )
   }
-  if (!clerkKey) return <App />
   return (
     <Suspense fallback={<div className="flex min-h-dvh items-center justify-center text-[14px] text-muted">Loading…</div>}>
       <AuthGate>
@@ -31,7 +30,13 @@ function Root() {
 
 const root = createRoot(document.getElementById('root')!)
 
-if (clerkKey) {
+if (!clerkKey) {
+  root.render(
+    <div className="flex min-h-dvh items-center justify-center bg-[#f4f6fa] p-6 text-[14px] text-muted">
+      Clerk is not configured. Set VITE_CLERK_PUBLISHABLE_KEY and redeploy.
+    </div>,
+  )
+} else {
   root.render(<div className="flex min-h-dvh items-center justify-center text-[14px] text-muted">Loading…</div>)
   void import('@clerk/clerk-react').then(({ ClerkProvider }) => {
     root.render(
@@ -42,12 +47,6 @@ if (clerkKey) {
       </StrictMode>,
     )
   })
-} else {
-  root.render(
-    <StrictMode>
-      <Root />
-    </StrictMode>,
-  )
 }
 
 if (import.meta.env.PROD && 'serviceWorker' in navigator) {
