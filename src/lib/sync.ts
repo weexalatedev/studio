@@ -9,7 +9,11 @@ let clerkTokenGetter: (() => Promise<string | null>) | null = null
 export const setClerkTokenGetter = (g: (() => Promise<string | null>) | null) => {
   clerkTokenGetter = g
 }
-export const isClerkConfigured = () => Boolean(import.meta.env.VITE_CLERK_PUBLISHABLE_KEY)
+export const isClerkConfigured = () =>
+  Boolean(
+    import.meta.env.NEXT_PUBLIC_VITE_CLERK_PUBLISHABLE_KEY ||
+      import.meta.env.VITE_CLERK_PUBLISHABLE_KEY
+  )
 
 export const getSyncToken = (): string => {
   try {
