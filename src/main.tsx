@@ -8,7 +8,9 @@ import './styles.css'
 const StyleGuide = lazy(() => import('./styleguide/StyleGuide'))
 const AuthGate = lazy(() => import('./app/AuthGate').then((m) => ({ default: m.AuthGate })))
 
-const clerkKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY as string | undefined
+const clerkKey =
+  import.meta.env.NEXT_PUBLIC_VITE_CLERK_PUBLISHABLE_KEY ||
+  import.meta.env.VITE_CLERK_PUBLISHABLE_KEY
 
 function Root() {
   const path = usePath().replace(/\/+$/, '') || '/'
@@ -33,7 +35,7 @@ const root = createRoot(document.getElementById('root')!)
 if (!clerkKey) {
   root.render(
     <div className="flex min-h-dvh items-center justify-center bg-[#f4f6fa] p-6 text-[14px] text-muted">
-      Clerk is not configured. Set VITE_CLERK_PUBLISHABLE_KEY and redeploy.
+      Clerk is not configured. Set VITE_CLERK_PUBLISHABLE_KEY or NEXT_PUBLIC_VITE_CLERK_PUBLISHABLE_KEY and redeploy.
     </div>,
   )
 } else {
