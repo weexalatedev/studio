@@ -51,7 +51,8 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
   // Resolve the caller's identity. When Clerk is configured we trust a verified
   // session JWT (sent as `Authorization: Bearer <token>`) and key the workspace
   // by the Clerk user id. Otherwise we fall back to the legacy sync token.
-  const clerkSecret = process.env.CLERK_SECRET_KEY
+  const clerkSecret =
+  process.env.CLERK_SECRET_KEY || process.env.VITE_CLERK_SECRET_KEY
   let clerkUserId: string | null = null
   if (clerkSecret) {
     const rawHeader = req.headers['authorization'] ?? req.headers['Authorization']
