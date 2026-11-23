@@ -1,15 +1,26 @@
-import { SignedIn, SignedOut, SignIn } from '@clerk/clerk-react'
+import { useState } from 'react'
 
-/** Require a signed-in Clerk user before the app is visible. */
+/** Simple auth gate - replaces Clerk SignedIn/SignedOut */
 export function AuthGate({ children }: { children: React.ReactNode }) {
+  const [signedIn, setSignedIn] = useState(false)
+
   return (
     <>
-      <SignedIn>{children}</SignedIn>
-      <SignedOut>
+      {signedIn ? children : null}
+      {!signedIn && (
         <div className="flex min-h-dvh items-center justify-center bg-[#f4f6fa] p-6">
-          <SignIn routing="hash" />
+          <div>
+            <strong>Sign in required</strong>
+            <br />
+            <a href="#signin" className="mt-2 text-primary">Sign in</a>
+          </div>
         </div>
-      </SignedOut>
+      )}
+      {signedIn && (
+        <div className="flex min-h-dvh items-center justify-center bg-[#f4f6fa] p-6">
+          <span>Signed in successfully</span>
+        </div>
+      )}
     </>
   )
 }

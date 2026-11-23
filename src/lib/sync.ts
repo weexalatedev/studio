@@ -5,11 +5,7 @@ import { normalizeState, type State } from '../app/store'
 
 const TOKEN_KEY = 'studio:sync-token'
 
-let clerkTokenGetter: (() => Promise<string | null>) | null = null
-export const setClerkTokenGetter = (g: (() => Promise<string | null>) | null) => {
-  clerkTokenGetter = g
 }
-export const isClerkConfigured = () =>
   Boolean(
     import.meta.env.NEXT_PUBLIC_VITE_CLERK_PUBLISHABLE_KEY ||
       import.meta.env.VITE_CLERK_PUBLISHABLE_KEY
@@ -43,8 +39,6 @@ type ApiBody = {
 async function call(method: 'GET' | 'PUT', token: string, data?: State): Promise<{ status: number; body: ApiBody }> {
   const headers: Record<string, string> = {}
   if (data) headers['Content-Type'] = 'application/json'
-  if (clerkTokenGetter) {
-    const ct = await clerkTokenGetter()
     if (ct) headers['Authorization'] = `Bearer ${ct}`
   } else if (token) {
     headers['x-sync-token'] = token
