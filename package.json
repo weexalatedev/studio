@@ -11,9 +11,10 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.api.json"
   },
-  "dependencies": {"@neondatabase/serverless": "^1.2.1",
+  "dependencies": {
     "hono": "^4.13.0",
     "lucide-react": "^1.60.0",
+    "mongodb": "^7.9.1",
     "motion": "^14.4.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"
