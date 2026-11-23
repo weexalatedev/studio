@@ -95,50 +95,41 @@ gets a plain static build plus the Node functions in `api/`.
 - `vercel.json` sets `npx vite build`, `outputDirectory: dist`, the SPA
   rewrite (everything except `/api/*` → `index.html`) and cache headers.
 - `api/health.ts` mirrors the Worker's health check.
-- `api/sync.ts` is the optional sync endpoint (returns 501 without a database).
+- `api/auth.ts` handles email + password sign up / sign in and issues JWTs.
+- `api/sync.ts` is the per-user sync endpoint (returns 501 without a database).
 
 Push the repo, import it in Vercel, deploy — no other configuration is needed
 for the local-first app.
 
-## Database: use Neon (free)
+## Auth and database: use MongoDB (free)
 
-For a small studio the best free option is **Neon** (serverless Postgres):
-100 projects, 1 GB storage and 100 compute-hours per project each month, no
-card, scales to zero after 5 minutes idle, and 10 branches for staging. Brains
-apart from Supabase's free tier, which pauses projects after a week of
-inactivity and caps you at two projects, and Prisma Postgres, which meters
-operations. Nothing here needs Redis, auth or a vector store.
+Accounts (email + password) and per-user cloud sync both run on **MongoDB**.
+MongoDB Atlas has a free tier (512 MB) and needs no card.
 
-1. Create a free project at <https://neon.com> and copy the **pooled**
-   connection string.
-2. Run the schema: `psql "$DATABASE_URL" -f db/schema.sql` (or paste
-   `db/schema.sql` into the Neon SQL editor).
-3. In Vercel → Settings → Environment Variables add `DATABASE_URL`.
-4. Open Studio → Settings → Cloud sync, type a long random token, then
-   **Push this device**. Use the same token on another device with **Pull from
-   cloud**.
+1. Create a free cluster at <https://www.mongodb.com/cloud/atlas> and copy its
+   connection string (the `mongodb+srv://…` URI).
+2. In Vercel → Settings → Environment Variables add:
+   - `MONGODB_URI` — the Atlas connection string.
+   - `AUTH_JWT_SECRET` — a long random string used to sign session JWTs.
+   - (optional) `MONGODB_DB` — database name, defaults to `studio`.
+3. Redeploy. Studio now requires sign in, and each account gets its own
+   workspace.
 
-The token is sent in an `x-sync-token` header and only its SHA-256 hash is
-stored, so a database leak does not expose it. Sync is last-write-wins: pull
-before editing on a second device, push when you finish. There is no auth
-service — the token *is* the credential, so keep it long and private.
+How auth works (`api/auth.ts`):
 
-### Optional: real accounts with Clerk (free)
+- `POST /api/auth` with `{ action: "signup" | "login", email, password }`
+  returns `{ token, user }`. Passwords are hashed with scrypt (node:crypto)
+  and users live in the `users` collection.
+- `GET /api/auth` with `Authorization: Bearer <token>` returns the current
+  user, so the browser can validate a stored session on load.
+- Tokens are HS256 JWTs signed with `AUTH_JWT_SECRET` and are valid for seven
+  days. The browser keeps the token in `localStorage` and sends it to
+  `/api/auth` and `/api/sync`.
 
-For per-user workspaces, add Clerk (free up to 10k
-monthly active users):
-
-1. Create a free app at <https://clerk.com> and copy the publishable key.
-2. In Vercel → Settings → Environment Variables add
-   `VITE_CLERK_PUBLISHABLE_KEY` (frontend) and `CLERK_SECRET_KEY` (backend).
-3. Redeploy. Studio now requires sign-in; each signed-in user gets their
-   own workspace in the same Neon database, keyed by their Clerk user id.
-
-Clerk is required for the app to run — without `VITE_CLERK_PUBLISHABLE_KEY`
-Studio shows a configuration screen instead of the dashboard.
-
-`api/sync.ts` verifies the Clerk session JWT with `@clerk/backend` when
-`CLERK_SECRET_KEY` is set.
+Cloud sync (`api/sync.ts`) then stores the workspace in the `workspaces`
+collection under the signed-in user id. Sync is last-write-wins: pull before
+editing on a second device, push when you finish. Without `MONGODB_URI` the app
+keeps working locally and sync returns 501.
 
 ## How it fits together
 
@@ -161,7 +152,7 @@ Studio shows a configuration screen instead of the dashboard.
 - `src/components/` — the design system, all shown at **`/styleguide`**.
 - `src/worker/index.ts` — the Cloudflare Worker that serves the app and
   `/api/health`.
-- `api/` — Vercel functions (`health`, optional `sync`).
+- `api/` — Vercel functions (`health`, `auth`, `sync`) plus `api/_lib/` helpers.
 - `public/sw.js`, `public/manifest.webmanifest`, `public/icons/` — the PWA.
 
 ### Tokens
