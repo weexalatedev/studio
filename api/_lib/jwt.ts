@@ -8,22 +8,8 @@ export type JwtPayload = {
   exp: number
 }
 
-const toBase64Url = (input: Buffer | string): string =>
-  Buffer.from(input)
-    .toString('base64')
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/, '')
-
-const fromBase64Url = (input: string): Buffer =>
-  Buffer.from(input.replace(/-/g, '+').replace(/_/g, '/'), 'base64')
-
 const DEFAULT_TTL_SECONDS = 60 * 60 * 24 * 7 // 7 days
 
-const signingSecret = process.env.AUTH_JWT_SECRET ||
-  process.env.JWT_SECRET ||
-  'studio-dev-insecure-secret-change-me'
-
 const toBase64Url = (input: Buffer | string): string =>
   Buffer.from(input)
     .toString('base64')
@@ -33,6 +19,18 @@ const toBase64Url = (input: Buffer | string): string =>
 
 const fromBase64Url = (input: string): Buffer =>
   Buffer.from(input.replace(/-/g, '+').replace(/_/g, '/'), 'base64')
+
+/**
+ * Signing secret. Set `AUTH_JWT_SECRET` in Vercel (Production + Preview).
+ * The dev fallback keeps local builds working but must never be used in prod.
+ */
+export function getJwtSecret(): string {
+  return (
+    process.env.AUTH_JWT_SECRET ||
+    process.env.JWT_SECRET ||
+    'studio-dev-insecure-secret-change-me'
+  )
+}
 
 export function signJwt(
   input: { sub: string; email: string },
@@ -44,21 +42,18 @@ export function signJwt(
     JSON.stringify({ sub: input.sub, email: input.email, iat: now, exp: now + ttlSeconds }),
   )
   const data = `${header}.${payload}`
-  const signature = toBase64Url(createHmac('sha256', getSigningSecret()).update(data).digest())
+  const signature = toBase64Url(createHmac('sha256', getJwtSecret()).update(data).digest())
   return `${data}.${signature}`
 }
 
-export function getSigningSecret(): string {
-  return process.env.AUTH_JWT_SECRET || process.env.JWT_SECRET || 'studio-dev-insecure-secret-change-me'
-}
-
+/** Returns the payload when the signature and expiry are valid, otherwise null. */
 export function verifyJwt(token: string): JwtPayload | null {
   const parts = token.split('.')
   if (parts.length !== 3) return null
   const [header, payload, signature] = parts
   if (!header || !payload || !signature) return null
 
-  const expected = toBase64Url(createHmac('sha256', getSigningSecret()).update(`${header}.${payload}`).digest())
+  const expected = toBase64Url(createHmac('sha256', getJwtSecret()).update(`${header}.${payload}`).digest())
   const actualBuf = Buffer.from(signature)
   const expectedBuf = Buffer.from(expected)
   if (actualBuf.length !== expectedBuf.length || !timingSafeEqual(actualBuf, expectedBuf)) {

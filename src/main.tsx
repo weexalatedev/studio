@@ -8,7 +8,6 @@ import './styles.css'
 const StyleGuide = lazy(() => import('./styleguide/StyleGuide'))
 const AuthGate = lazy(() => import('./app/AuthGate').then((m) => ({ default: m.AuthGate })))
 
-
 function Root() {
   const path = usePath().replace(/\/+$/, '') || '/'
   if (path === '/styleguide') {
@@ -29,10 +28,11 @@ function Root() {
 
 const root = createRoot(document.getElementById('root')!)
 
-    </div>,
-  )
-  })
-}
+root.render(
+  <StrictMode>
+    <Root />
+  </StrictMode>,
+)
 
 if (import.meta.env.PROD && 'serviceWorker' in navigator) {
   window.addEventListener('load', () => {

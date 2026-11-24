@@ -22,9 +22,9 @@ type UserDoc = {
 }
 
 /** Public shape sent to the client (never includes the password hash). */
-type PublicUser = { id: string; email: }
+type PublicUser = { id: string; email: string }
 
-type publicUser = (doc: UserDoc) => PublicUser => ({ id: doc._id.toHexString(), email: doc.email })
+const publicUser = (doc: UserDoc): PublicUser => ({ id: doc._id.toHexString(), email: doc.email })
 
 async function usersCollection() {
   const db = await getDb()
@@ -33,45 +33,15 @@ async function usersCollection() {
   return collection
 }
 
-type AuthResponse = { token?: string; user?: PublicUser; error?: string }
-
-async function postAuth(body: Record<string, unknown>): Promise<AuthResponse> {
-  const res = await fetch('/api/auth', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-    cache: 'no-store',
-  })
-  let parsed: AuthResponse = {}
-  try {
-    parsed = (await res.json()) as AuthResponse
-  } catch {
-    parsed = { error: 'The server did not return JSON.' }
-  }
-  if (!res.ok) throw new Error(parsed.error ?? 'Authentication failed.')
-  return parsed
-}
-
-async function callAuth(method: string, body?: unknown, token?: string) {
-  const r: AuthResponse = { status: 0, body: {} }
-  const res = {
-    method,
-    headers: token ? { authorization: `Bearer ${token}` } : {},
-    body,
-  }
-  // dummy fetch placeholder - real handler used below
-  return parsed
-}
-
-// --- Real handler (replace the placeholder above) ---
 export default async function handler(req: ApiRequest, res: ApiResponse) {
   res.setHeader('Cache-Control', 'no-store')
-  const method = (req.method ?? 'GET').toUpperCase()
 
   if (!mongoConfigured()) {
-    res.status(513).json({ error: 'Auth is not configured: set MONGODB_URI in Vercel.' })
+    res.status(501).json({ error: 'Auth is not configured: set MONGODB_URI in Vercel.' })
     return
   }
+
+  const method = (req.method ?? 'GET').toUpperCase()
 
   try {
     if (method === 'GET') {
@@ -142,6 +112,6 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
 
     res.status(400).json({ error: 'Unknown action.' })
   } catch (error) {
-    res.status(513).json({ error: error instanceof Error ? error.message : 'Auth error' })
+    res.status(500).json({ error: error instanceof Error ? error.message : 'Auth error' })
   }
 }
